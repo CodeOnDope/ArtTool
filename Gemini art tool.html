@@ -796,7 +796,22 @@
         function drawGrid3P(vp1,vp2,vp3){ for(let i=0;i<=numGridLines;i++){let r=i/numGridLines;drawLineToVP(canvas.width*r,0,vp1);drawLineToVP(canvas.width*r,canvas.height,vp1);drawLineToVP(0,canvas.height*r,vp2);drawLineToVP(canvas.width,canvas.height*r,vp2);drawLineToVP(canvas.width*r,(vp3.y<horizonY?canvas.height:0),vp3);drawLineToVP((vp3.x<canvas.width/2?canvas.width:0),canvas.height*r,vp3);}}
         function drawAxisReferenceLines() { const origin={x:canvas.width/2,y:horizonY};const axisLength=Math.min(canvas.width,canvas.height)*0.4;ctx.save();ctx.lineWidth=1.5;ctx.strokeStyle='rgba(0,255,0,0.7)';ctx.beginPath();ctx.moveTo(origin.x,origin.y-axisLength);ctx.lineTo(origin.x,origin.y+axisLength);ctx.stroke();ctx.fillText("Y",origin.x+5,origin.y-axisLength-5);ctx.strokeStyle='rgba(255,0,0,0.7)';const vpX=vps.find(vp=>vp.id==='VP1');if(perspectiveType==='2'&&vpX){drawLineToVP(origin.x,origin.y,vpX,'rgba(255,0,0,0.7)');const oppositeVpX={x:origin.x-(vpX.x-origin.x),y:origin.y-(vpX.y-origin.y)};drawLineToVP(origin.x,origin.y,oppositeVpX,'rgba(255,0,0,0.7)');ctx.fillText("X",vpX.x>origin.x?vpX.x-20:vpX.x+10,vpX.y);}else if(perspectiveType==='1'&&vpX){ctx.beginPath();ctx.moveTo(origin.x-axisLength,origin.y);ctx.lineTo(origin.x+axisLength,origin.y);ctx.stroke();ctx.fillText("X",origin.x+axisLength+5,origin.y+5);}else if(perspectiveType==='3'&&vpX){drawLineToVP(origin.x,origin.y,vpX,'rgba(255,0,0,0.7)');const oppositeVpX={x:origin.x-(vpX.x-origin.x),y:origin.y-(vpX.y-origin.y)};drawLineToVP(origin.x,origin.y,oppositeVpX,'rgba(255,0,0,0.7)');ctx.fillText("X",vpX.x>origin.x?vpX.x-20:vpX.x+10,vpX.y);}ctx.strokeStyle='rgba(0,0,255,0.7)';const vpZ=vps.find(vp=>vp.id===(perspectiveType==='1'?'VP1':'VP2'));if((perspectiveType==='2'||perspectiveType==='3')&&vpZ){drawLineToVP(origin.x,origin.y,vpZ,'rgba(0,0,255,0.7)');const oppositeVpZ={x:origin.x-(vpZ.x-origin.x),y:origin.y-(vpZ.y-origin.y)};drawLineToVP(origin.x,origin.y,oppositeVpZ,'rgba(0,0,255,0.7)');ctx.fillText("Z",vpZ.x>origin.x?vpZ.x-20:vpZ.x+10,vpZ.y);}else if(perspectiveType==='1'&&vpZ){drawLineToVP(origin.x,origin.y,vpZ,'rgba(0,0,255,0.7)');const farPoint={x:origin.x-(vpZ.x-origin.x),y:origin.y-(vpZ.y-origin.y)};drawLineToVP(origin.x,origin.y,farPoint,'rgba(0,0,255,0.7)');ctx.fillText("Z",vpZ.x,vpZ.y+15);}ctx.restore(); }
         function drawUserLine(line) { ctx.beginPath();ctx.moveTo(line.startX,line.startY);ctx.lineTo(line.endX,line.endY);ctx.strokeStyle=line.color;ctx.lineWidth=line.lineWidth;ctx.lineCap="round";ctx.stroke(); }
-        function intersect(p1,p2,p3,p4) { if(!p1||!p2||!p3||!p4)return null;const den=(p1.x-p2.x)*(p3.y-p4.y)-(p1.y-p2.y)*(p3.x-p4.x);if(den===0)return null;const t=((p1.x-p3.x)*(p3.y-p4.y)-(p1.y-p3.y)*(p3.x-p4.x))/den;const ix=p1.x+t*(p2.x-p1.x);const iy=p1.y+t*(p2.y-p1.y);if(!isFinite(ix)||!isFinite(iy))return null;return{x:ix,y:iy}; }
+function intersect(p1,p2,p3,p4) { if(!p1||!p2||!p3||!p4)return null;const den=(p1.x-p2.x)*(p3.y-p4.y)-(p1.y-p2.y)*(p3.x-p4.x);if(den===0)return null;const t=((p1.x-p3.x)*(p3.y-p4.y)-(p1.y-p3.y)*(p3.x-p4.x))/den;const ix=p1.x+t*(p2.x-p1.x);const iy=p1.y+t*(p2.y-p1.y);if(!isFinite(ix)||!isFinite(iy))return null;return{x:ix,y:iy}; }
+
+        function rotateVPForObject(vp, anchorX, anchorY, angleRad) {
+            if(!vp) return null;
+            const dx = vp.x - anchorX;
+            const dy = vp.y - anchorY;
+            const cosA = Math.cos(angleRad);
+            const sinA = Math.sin(angleRad);
+            const dxR = dx * cosA - dy * sinA;
+            const dyR = dx * sinA + dy * cosA;
+            if(Math.abs(dyR) < 0.0001) {
+                return { x: anchorX + dxR * 10000, y: horizonY };
+            }
+            const t = (horizonY - anchorY) / dyR;
+            return { x: anchorX + dxR * t, y: horizonY };
+        }
         
         // --- Shape Point Calculation ---
         function recalculateShapePoints(shapeObject) {
@@ -810,48 +825,61 @@
 
         // --- Cube Specific Logic ---
         function calculateCubePointsForPerspective(anchorX, anchorY, objData, pType, currentVps) {
-            const { width, height, depth, rotationY = 0 } = objData; 
-            let p_unrotated = Array(8).fill(null); 
-            let p_final = Array(8).fill(null).map(() => ({x:0, y:0})); 
-            
+            const { width, height, depth, rotationY = 0 } = objData;
+            const anchorYCalc = Math.abs(anchorY - horizonY) < 0.001 ? anchorY + 0.001 : anchorY;
+            let p_unrotated = Array(8).fill(null);
+            let p_final = Array(8).fill(null).map(() => ({x:0, y:0}));
+
             const calculateFactor = (dim, defaultDimBase) => { if (defaultDimBase === 0) return PERSPECTIVE_STRENGTH; return Math.max(0.01, Math.min(0.99, PERSPECTIVE_STRENGTH * (dim / defaultDimBase))); }
-            const effWidthFactor = calculateFactor(width, 50); 
+            const effWidthFactor = calculateFactor(width, 50);
             const effDepthFactor = calculateFactor(depth, 50);
             const effHeightFactor3P = calculateFactor(height, 50);
-            
+
             const angleRad = rotationY * Math.PI / 180;
-            const cosA = Math.cos(angleRad);
-            const sinA = Math.sin(angleRad);
+            let localVps = currentVps;
+            if((pType === '2' || pType === '3') && rotationY !== 0 && currentVps.length >= 2) {
+                const rvp1 = rotateVPForObject(currentVps[0], anchorX, anchorYCalc, angleRad);
+                const rvp2 = rotateVPForObject(currentVps[1], anchorX, anchorYCalc, angleRad);
+                if(rvp1 && rvp2) {
+                    localVps = [...currentVps];
+                    localVps[0] = rvp1;
+                    localVps[1] = rvp2;
+                }
+            }
+
+            const finalRotRad = (pType === '1') ? angleRad : 0;
+            const cosA = Math.cos(finalRotRad);
+            const sinA = Math.sin(finalRotRad);
             const rotatePoint = (point, anchor) => { if (!point) return null; const dx = point.x - anchor.x; const dy = point.y - anchor.y; return { x: anchor.x + (dx * cosA - dy * sinA), y: anchor.y + (dx * sinA + dy * cosA) }; };
 
-            if (pType === '1' && currentVps.length >= 1) {
-                const vp1 = currentVps[0];
-                p_unrotated[0] = { x: anchorX - width/2, y: anchorY - height/2 }; 
-                p_unrotated[1] = { x: anchorX + width/2, y: anchorY - height/2 };
-                p_unrotated[2] = { x: anchorX + width/2, y: anchorY + height/2 }; 
-                p_unrotated[3] = { x: anchorX - width/2, y: anchorY + height/2 };
+            if (pType === '1' && localVps.length >= 1) {
+                const vp1 = localVps[0];
+                p_unrotated[0] = { x: anchorX - width/2, y: anchorYCalc - height/2 };
+                p_unrotated[1] = { x: anchorX + width/2, y: anchorYCalc - height/2 };
+                p_unrotated[2] = { x: anchorX + width/2, y: anchorYCalc + height/2 };
+                p_unrotated[3] = { x: anchorX - width/2, y: anchorYCalc + height/2 };
                 for(let i=0; i<4; i++) {
                     p_unrotated[i+4] = getProjectedPoint(p_unrotated[i], vp1, effDepthFactor);
                     if (!p_unrotated[i+4]) return null; 
                 }
-            } else if (pType === '2' && currentVps.length >= 2) {
-                const vp1 = currentVps[0]; const vp2 = currentVps[1];
+            } else if (pType === '2' && localVps.length >= 2) {
+                const vp1 = localVps[0]; const vp2 = localVps[1];
                 // Define base points using anchor and VPs
-                p_unrotated[0] = {x: anchorX, y: anchorY}; // Bottom-front corner
+                p_unrotated[0] = {x: anchorX, y: anchorYCalc}; // Bottom-front corner
                 p_unrotated[1] = getProjectedPoint(p_unrotated[0], vp1, effWidthFactor); if(!p_unrotated[1]) return null;
                 p_unrotated[3] = getProjectedPoint(p_unrotated[0], vp2, effDepthFactor); if(!p_unrotated[3]) return null;
                 p_unrotated[2] = intersect(p_unrotated[1], vp2, p_unrotated[3], vp1); if(!p_unrotated[2]) return null;
 
                 // Define top points by projecting from a "top anchor"
-                const topAnchor = {x: anchorX, y: anchorY - height};
+                const topAnchor = {x: anchorX, y: anchorYCalc - height};
                 p_unrotated[4] = topAnchor; // Top-front corner (directly above anchor before perspective)
                 p_unrotated[5] = getProjectedPoint(p_unrotated[4], vp1, effWidthFactor); if(!p_unrotated[5]) return null;
                 p_unrotated[7] = getProjectedPoint(p_unrotated[4], vp2, effDepthFactor); if(!p_unrotated[7]) return null;
                 p_unrotated[6] = intersect(p_unrotated[5], vp2, p_unrotated[7], vp1); if(!p_unrotated[6]) return null;
 
-            } else if (pType === '3' && currentVps.length >= 3) {
-                const vp1 = currentVps[0]; const vp2 = currentVps[1]; const vp3 = currentVps[2];
-                p_unrotated[0] = {x: anchorX, y: anchorY};
+            } else if (pType === '3' && localVps.length >= 3) {
+                const vp1 = localVps[0]; const vp2 = localVps[1]; const vp3 = localVps[2];
+                p_unrotated[0] = {x: anchorX, y: anchorYCalc};
                 p_unrotated[1] = getProjectedPoint(p_unrotated[0], vp1, effWidthFactor); if(!p_unrotated[1]) return null;
                 p_unrotated[3] = getProjectedPoint(p_unrotated[0], vp2, effDepthFactor); if(!p_unrotated[3]) return null;
                 p_unrotated[4] = getProjectedPoint(p_unrotated[0], vp3, effHeightFactor3P); if(!p_unrotated[4]) return null;
@@ -866,10 +894,10 @@
                 if(!p_unrotated[6]) return null;
             } else { return null; }
 
-            if (rotationY !== 0) {
+            if (finalRotRad !== 0) {
                 for (let i = 0; i < 8; i++) {
                     if (!p_unrotated[i]) return null; 
-                    p_final[i] = rotatePoint(p_unrotated[i], {x: anchorX, y: anchorY}); 
+                    p_final[i] = rotatePoint(p_unrotated[i], {x: anchorX, y: anchorYCalc});
                     if(!p_final[i]) return null;
                 }
             } else {
@@ -883,7 +911,12 @@
             return p_final;
         }
         function addPerspectiveCube(anchorX, anchorY, width, height, depth, id = Date.now(), material = objMaterialSelect.value, fillColor = globalDefaultFillColor, hasCustomColor = false, rotationY = 0) { 
-            const cubeData = { width, height, depth, rotationY }; const points = calculateCubePointsForPerspective(anchorX, anchorY, cubeData, perspectiveType, vps); if (!points) { console.warn("Could not calculate points for cube at add."); return false; }
+            const cubeData = { width, height, depth, rotationY };
+            let points = calculateCubePointsForPerspective(anchorX, anchorY, cubeData, perspectiveType, vps);
+            if (!points && rotationY !== 0) {
+                points = calculateCubePointsForPerspective(anchorX, anchorY, {width, height, depth, rotationY: 0}, perspectiveType, vps);
+            }
+            if (!points) { console.warn("Could not calculate points for cube at add."); return false; }
             let finalFillColor = fillColor; if (!hasCustomColor) { if (material === 'building_default') finalFillColor = '#a0a0a0'; else if (material === 'glass') finalFillColor = '#add8e6'; else if (material === 'wood') finalFillColor = '#deb887'; else if (material === 'brick') finalFillColor = '#b22222'; else finalFillColor = globalDefaultFillColor; }
             drawnObjects.push({ type: 'cube', id: id, data: { points: points, width: width, height: height, depth: depth, anchor: {x: anchorX, y: anchorY}, rotationY: rotationY, fillColor: finalFillColor, strokeColor: currentLineColor, lineWidth: currentLineWidth, material: material, viewMode: objViewModeSelect.value, hasCustomColor: hasCustomColor } });
             saveState(); draw(); return true; 
@@ -901,6 +934,7 @@
         // --- Pyramid Specific Logic ---
         function calculatePyramidPointsForPerspective(anchorX, anchorY, objData, pType, currentVps) {
             const { baseWidth, baseDepth, height, rotationY = 0 } = objData;
+            const anchorYCalc = Math.abs(anchorY - horizonY) < 0.001 ? anchorY + 0.001 : anchorY;
             let p_unrotated_base = Array(4).fill(null);
             let p_unrotated_apex = null;
             let p_final = Array(5).fill(null).map(() => ({x:0, y:0}));
@@ -911,16 +945,28 @@
             const effHeightFactor3P = calculateFactor(height, 50);
 
             const angleRad = rotationY * Math.PI / 180;
-            const cosA = Math.cos(angleRad);
-            const sinA = Math.sin(angleRad);
+            let localVps = currentVps;
+            if((pType === '2' || pType === '3') && rotationY !== 0 && currentVps.length >= 2) {
+                const rvp1 = rotateVPForObject(currentVps[0], anchorX, anchorYCalc, angleRad);
+                const rvp2 = rotateVPForObject(currentVps[1], anchorX, anchorYCalc, angleRad);
+                if(rvp1 && rvp2) {
+                    localVps = [...currentVps];
+                    localVps[0] = rvp1;
+                    localVps[1] = rvp2;
+                }
+            }
+
+            const finalRotRad = (pType === '1') ? angleRad : 0;
+            const cosA = Math.cos(finalRotRad);
+            const sinA = Math.sin(finalRotRad);
             const rotatePoint = (point, anchor) => { if (!point) return null; const dx = point.x - anchor.x; const dy = point.y - anchor.y; return { x: anchor.x + (dx * cosA - dy * sinA), y: anchor.y + (dx * sinA + dy * cosA) }; };
 
-            if (pType === '1' && currentVps.length >= 1) {
-                const vp1 = currentVps[0];
-                p_unrotated_base[0] = { x: anchorX - baseWidth/2, y: anchorY + baseDepth/2 };
-                p_unrotated_base[1] = { x: anchorX + baseWidth/2, y: anchorY + baseDepth/2 };
-                p_unrotated_base[2] = { x: anchorX + baseWidth/2, y: anchorY - baseDepth/2 };
-                p_unrotated_base[3] = { x: anchorX - baseWidth/2, y: anchorY - baseDepth/2 };
+            if (pType === '1' && localVps.length >= 1) {
+                const vp1 = localVps[0];
+                p_unrotated_base[0] = { x: anchorX - baseWidth/2, y: anchorYCalc + baseDepth/2 };
+                p_unrotated_base[1] = { x: anchorX + baseWidth/2, y: anchorYCalc + baseDepth/2 };
+                p_unrotated_base[2] = { x: anchorX + baseWidth/2, y: anchorYCalc - baseDepth/2 };
+                p_unrotated_base[3] = { x: anchorX - baseWidth/2, y: anchorYCalc - baseDepth/2 };
                 for(let i=0; i<4; i++) {
                     p_unrotated_base[i] = getProjectedPoint(p_unrotated_base[i], vp1, effBaseDFactor);
                     if(!p_unrotated_base[i]) return null;
@@ -931,9 +977,9 @@
                 p_unrotated_apex = getProjectedPoint(p_unrotated_apex, vp1, effBaseDFactor); 
                 if(!p_unrotated_apex) return null;
 
-            } else if (pType === '2' && currentVps.length >= 2) {
-                const vp1 = currentVps[0]; const vp2 = currentVps[1];
-                p_unrotated_base[0] = {x: anchorX, y: anchorY};
+            } else if (pType === '2' && localVps.length >= 2) {
+                const vp1 = localVps[0]; const vp2 = localVps[1];
+                p_unrotated_base[0] = {x: anchorX, y: anchorYCalc};
                 p_unrotated_base[1] = getProjectedPoint(p_unrotated_base[0], vp1, effBaseWFactor); if(!p_unrotated_base[1]) return null;
                 p_unrotated_base[3] = getProjectedPoint(p_unrotated_base[0], vp2, effBaseDFactor); if(!p_unrotated_base[3]) return null;
                 p_unrotated_base[2] = intersect(p_unrotated_base[1], vp2, p_unrotated_base[3], vp1); if(!p_unrotated_base[2]) return null;
@@ -942,9 +988,9 @@
                 const baseYCenter = (p_unrotated_base[0].y + p_unrotated_base[1].y + p_unrotated_base[2].y + p_unrotated_base[3].y) / 4;
                 p_unrotated_apex = { x: baseXCenter, y: baseYCenter - height }; 
 
-            } else if (pType === '3' && currentVps.length >= 3) {
-                const vp1 = currentVps[0]; const vp2 = currentVps[1]; const vp3 = currentVps[2];
-                p_unrotated_base[0] = {x: anchorX, y: anchorY};
+            } else if (pType === '3' && localVps.length >= 3) {
+                const vp1 = localVps[0]; const vp2 = localVps[1]; const vp3 = localVps[2];
+                p_unrotated_base[0] = {x: anchorX, y: anchorYCalc};
                 p_unrotated_base[1] = getProjectedPoint(p_unrotated_base[0], vp1, effBaseWFactor); if(!p_unrotated_base[1]) return null;
                 p_unrotated_base[3] = getProjectedPoint(p_unrotated_base[0], vp2, effBaseDFactor); if(!p_unrotated_base[3]) return null;
                 p_unrotated_base[2] = intersect(p_unrotated_base[1], vp2, p_unrotated_base[3], vp1); if(!p_unrotated_base[2]) return null;
@@ -956,12 +1002,12 @@
                 if(!p_unrotated_apex) return null;
             } else { return null; }
 
-            if (rotationY !== 0) {
+            if (finalRotRad !== 0) {
                 for(let i=0; i<4; i++) {
-                    p_final[i] = rotatePoint(p_unrotated_base[i], {x: anchorX, y: anchorY});
+                    p_final[i] = rotatePoint(p_unrotated_base[i], {x: anchorX, y: anchorYCalc});
                     if(!p_final[i]) return null;
                 }
-                p_final[4] = rotatePoint(p_unrotated_apex, {x: anchorX, y: anchorY}); 
+                p_final[4] = rotatePoint(p_unrotated_apex, {x: anchorX, y: anchorYCalc});
                 if(!p_final[4]) return null;
             } else {
                 for(let i=0; i<4; i++) p_final[i] = p_unrotated_base[i];
@@ -974,7 +1020,10 @@
 
         function addPerspectivePyramid(anchorX, anchorY, baseWidth, baseDepth, height, id = Date.now(), material = objMaterialSelect.value, fillColor = globalDefaultFillColor, hasCustomColor = false, rotationY = 0) {
             const pyramidData = { baseWidth, baseDepth, height, rotationY };
-            const points = calculatePyramidPointsForPerspective(anchorX, anchorY, pyramidData, perspectiveType, vps);
+            let points = calculatePyramidPointsForPerspective(anchorX, anchorY, pyramidData, perspectiveType, vps);
+            if (!points && rotationY !== 0) {
+                points = calculatePyramidPointsForPerspective(anchorX, anchorY, {baseWidth, baseDepth, height, rotationY: 0}, perspectiveType, vps);
+            }
             if (!points) { console.warn("Could not calculate points for pyramid at add."); return false; }
 
             let finalFillColor = fillColor;
