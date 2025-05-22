@@ -1,10 +1,9 @@
-<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Perspective Pro</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="css/tailwind.min.css">
     <style>
         body { 
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; 
@@ -236,8 +235,16 @@
                  <div><label for="objAnchorYInput">Anchor Y:</label><input type="number" id="objAnchorYInput" step="1"></div>
             </div>
             <div class="rotation-input mb-2">
+                <label for="objRotationXInput">Rotation X:</label>
+                <input type="range" id="objRotationXInput" min="-180" max="180" step="1" value="0"><span id="objRotationXValue">0°</span>
+            </div>
+            <div class="rotation-input mb-2">
                 <label for="objRotationYInput">Rotation Y:</label>
-                <input type="range" id="objRotationYInput" min="0" max="360" step="1" value="0"><span id="objRotationYValue">0°</span>
+                <input type="range" id="objRotationYInput" min="-180" max="180" step="1" value="0"><span id="objRotationYValue">0°</span>
+            </div>
+            <div class="rotation-input mb-2">
+                <label for="objRotationZInput">Rotation Z:</label>
+                <input type="range" id="objRotationZInput" min="-180" max="180" step="1" value="0"><span id="objRotationZValue">0°</span>
             </div>
             <div class="dimension-inputs" id="selectedObjDimControls">
                 </div>
@@ -263,9 +270,15 @@
         <button id="resetVPs">Reset VPs</button>
         <button id="clearDrawing" class="mt-2 w-full bg-red-500 hover:bg-red-600">Clear All Drawings</button>
         <div id="vpInfo" class="vp-info">VP1: (-, -)</div>
+        <button id="showLearn" class="mt-2 w-full">Learn Perspective</button>
     </div>
     <div class="main-content">
         <canvas id="artCanvas"></canvas>
+        <div id="learnOverlay" style="display:none; position:absolute; top:10px; left:10px; right:10px; background:white; border:1px solid #ccc; padding:10px; max-width:300px; font-size:14px;">
+            <b>Perspective Tips</b>
+            <p class="text-xs text-gray-500">Use vanishing points to guide lines. 1‑point for facing objects, 2‑point for corners, and 3‑point when looking up or down.</p>
+            <button id="closeLearn" class="mt-2 w-full bg-red-500 hover:bg-red-600">Close</button>
+        </div>
     </div>
     <div class="footer">
         Developed by Dineshkumar Rajendran, Copyright 2025.
@@ -280,6 +293,9 @@
         const resetVPsButton = document.getElementById('resetVPs');
         const clearDrawingButton = document.getElementById('clearDrawing');
         const vpInfoDiv = document.getElementById('vpInfo');
+        const showLearnBtn = document.getElementById('showLearn');
+        const learnOverlay = document.getElementById('learnOverlay');
+        const closeLearnBtn = document.getElementById('closeLearn');
         const gridLinesSlider = document.getElementById('gridLines');
         const lineColorPicker = document.getElementById('lineColor');
         const lineWidthSlider = document.getElementById('lineWidth');
@@ -310,9 +326,13 @@
         const selectedObjectTypeLabel = document.getElementById('selectedObjectTypeLabel');
         const selectedObjDimControls = document.getElementById('selectedObjDimControls'); 
         const objAnchorXInput = document.getElementById('objAnchorXInput'); 
-        const objAnchorYInput = document.getElementById('objAnchorYInput'); 
-        const objRotationYInput = document.getElementById('objRotationYInput'); 
-        const objRotationYValue = document.getElementById('objRotationYValue'); 
+        const objAnchorYInput = document.getElementById('objAnchorYInput');
+        const objRotationXInput = document.getElementById('objRotationXInput');
+        const objRotationYInput = document.getElementById('objRotationYInput');
+        const objRotationZInput = document.getElementById('objRotationZInput');
+        const objRotationXValue = document.getElementById('objRotationXValue');
+        const objRotationYValue = document.getElementById('objRotationYValue');
+        const objRotationZValue = document.getElementById('objRotationZValue');
         const objFillColorPicker = document.getElementById('objFillColor');
         const objMaterialSelect = document.getElementById('objMaterialSelect'); 
         const objViewModeSelect = document.getElementById('objViewMode');
@@ -355,7 +375,8 @@
 
         const VP_RADIUS = 8;
         const VP_COLORS = ['#FF6347', '#4682B4', '#32CD32', '#FFD700'];
-        const PERSPECTIVE_STRENGTH = 0.35; 
+        const PERSPECTIVE_STRENGTH = 0.35;
+        const FOV_DIST = 800;
 
         // --- Initialization ---
         function init() {
@@ -427,6 +448,9 @@
             toolDrawCubeBtn.addEventListener('click', () => setActiveTool('cube'));
             toolDrawPyramidBtn.addEventListener('click', () => setActiveTool('pyramid'));
 
+            showLearnBtn.addEventListener('click', () => { learnOverlay.style.display = 'block'; });
+            closeLearnBtn.addEventListener('click', () => { learnOverlay.style.display = 'none'; });
+
 
             defaultCubeWidthInput.addEventListener('input', e => { currentDefaultCubeWidth = parseFloat(e.target.value) || 50; if(activeTool === 'cube') draw(); });
             defaultCubeHeightInput.addEventListener('input', e => { currentDefaultCubeHeight = parseFloat(e.target.value) || 50; if(activeTool === 'cube') draw(); });
@@ -438,7 +462,9 @@
 
             objAnchorXInput.addEventListener('input', handleSelectedObjectTransformChange);
             objAnchorYInput.addEventListener('input', handleSelectedObjectTransformChange);
+            objRotationXInput.addEventListener('input', handleSelectedObjectTransformChange);
             objRotationYInput.addEventListener('input', handleSelectedObjectTransformChange);
+            objRotationZInput.addEventListener('input', handleSelectedObjectTransformChange);
             objFillColorPicker.addEventListener('input', handleSelectedObjectFillColorChange);
             objMaterialSelect.addEventListener('change', handleSelectedObjectMaterialChange);
             objViewModeSelect.addEventListener('change', handleSelectedObjectViewModeChange);
@@ -459,8 +485,12 @@
             if (selectedObject) {
                 const newAnchorX = parseFloat(objAnchorXInput.value);
                 const newAnchorY = parseFloat(objAnchorYInput.value);
+                const newRotationX = parseFloat(objRotationXInput.value);
                 const newRotationY = parseFloat(objRotationYInput.value);
+                const newRotationZ = parseFloat(objRotationZInput.value);
+                objRotationXValue.textContent = newRotationX + "°";
                 objRotationYValue.textContent = newRotationY + "°";
+                objRotationZValue.textContent = newRotationZ + "°";
 
                 let changed = false;
                 if (!isNaN(newAnchorX) && selectedObject.data.anchor.x !== newAnchorX) {
@@ -469,9 +499,9 @@
                 if (!isNaN(newAnchorY) && selectedObject.data.anchor.y !== newAnchorY) {
                     selectedObject.data.anchor.y = newAnchorY; changed = true;
                 }
-                if (!isNaN(newRotationY) && selectedObject.data.rotationY !== newRotationY) {
-                    selectedObject.data.rotationY = newRotationY; changed = true;
-                }
+                if (!isNaN(newRotationX) && selectedObject.data.rotationX !== newRotationX) { selectedObject.data.rotationX = newRotationX; changed = true; }
+                if (!isNaN(newRotationY) && selectedObject.data.rotationY !== newRotationY) { selectedObject.data.rotationY = newRotationY; changed = true; }
+                if (!isNaN(newRotationZ) && selectedObject.data.rotationZ !== newRotationZ) { selectedObject.data.rotationZ = newRotationZ; changed = true; }
 
                 if (changed) {
                     const success = recalculateShapePoints(selectedObject);
@@ -480,8 +510,12 @@
                         console.warn("Failed to transform object.");
                         objAnchorXInput.value = selectedObject.data.anchor.x;
                         objAnchorYInput.value = selectedObject.data.anchor.y;
+                        objRotationXInput.value = selectedObject.data.rotationX;
                         objRotationYInput.value = selectedObject.data.rotationY;
+                        objRotationZInput.value = selectedObject.data.rotationZ;
+                        objRotationXValue.textContent = selectedObject.data.rotationX + "°";
                         objRotationYValue.textContent = selectedObject.data.rotationY + "°";
+                        objRotationZValue.textContent = selectedObject.data.rotationZ + "°";
                     }
                 }
             }
@@ -583,8 +617,12 @@
                 selectedObjectTypeLabel.textContent = `Selected ${selectedObject.type.charAt(0).toUpperCase() + selectedObject.type.slice(1)} Properties:`;
                 objAnchorXInput.value = Math.round(selectedObject.data.anchor.x);
                 objAnchorYInput.value = Math.round(selectedObject.data.anchor.y);
+                objRotationXInput.value = selectedObject.data.rotationX || 0;
                 objRotationYInput.value = selectedObject.data.rotationY;
+                objRotationZInput.value = selectedObject.data.rotationZ || 0;
+                objRotationXValue.textContent = (selectedObject.data.rotationX || 0) + "°";
                 objRotationYValue.textContent = selectedObject.data.rotationY + "°";
+                objRotationZValue.textContent = (selectedObject.data.rotationZ || 0) + "°";
                 
                 selectedObjDimControls.innerHTML = ''; 
                 if (selectedObject.type === 'cube') {
@@ -593,18 +631,18 @@
                         <div><label for="selectedObjHeight">Height:</label><input type="number" id="selectedObjHeight" min="1" max="1000" step="1" value="${selectedObject.data.height}"></div>
                         <div><label for="selectedObjDepth">Depth:</label><input type="number" id="selectedObjDepth" min="1" max="1000" step="1" value="${selectedObject.data.depth}"></div>
                     `;
-                    document.getElementById('selectedObjWidth').addEventListener('input', handleSelectedObjectDimensionChange);
-                    document.getElementById('selectedObjHeight').addEventListener('input', handleSelectedObjectDimensionChange);
-                    document.getElementById('selectedObjDepth').addEventListener('input', handleSelectedObjectDimensionChange);
+                    document.getElementById('selectedObjWidth').addEventListener('keydown', e=>{if(e.key==='Enter')handleSelectedObjectDimensionChange(e)});
+                    document.getElementById('selectedObjHeight').addEventListener('keydown', e=>{if(e.key==='Enter')handleSelectedObjectDimensionChange(e)});
+                    document.getElementById('selectedObjDepth').addEventListener('keydown', e=>{if(e.key==='Enter')handleSelectedObjectDimensionChange(e)});
                 } else if (selectedObject.type === 'pyramid') {
                      selectedObjDimControls.innerHTML = `
                         <div><label for="selectedObjBaseW">Base W:</label><input type="number" id="selectedObjBaseW" min="1" max="1000" step="1" value="${selectedObject.data.baseWidth}"></div>
                         <div><label for="selectedObjBaseD">Base D:</label><input type="number" id="selectedObjBaseD" min="1" max="1000" step="1" value="${selectedObject.data.baseDepth}"></div>
                         <div><label for="selectedObjHeight">Height:</label><input type="number" id="selectedObjHeight" min="1" max="1000" step="1" value="${selectedObject.data.height}"></div>
                     `;
-                    document.getElementById('selectedObjBaseW').addEventListener('input', handleSelectedObjectDimensionChange);
-                    document.getElementById('selectedObjBaseD').addEventListener('input', handleSelectedObjectDimensionChange);
-                    document.getElementById('selectedObjHeight').addEventListener('input', handleSelectedObjectDimensionChange); 
+                    document.getElementById('selectedObjBaseW').addEventListener('keydown', e=>{if(e.key==='Enter')handleSelectedObjectDimensionChange(e)});
+                    document.getElementById('selectedObjBaseD').addEventListener('keydown', e=>{if(e.key==='Enter')handleSelectedObjectDimensionChange(e)});
+                    document.getElementById('selectedObjHeight').addEventListener('keydown', e=>{if(e.key==='Enter')handleSelectedObjectDimensionChange(e)}); 
                 }
 
                 objFillColorPicker.value = selectedObject.data.fillColor;
@@ -781,9 +819,9 @@
             }); 
             if(showVPs)drawVanishingPoints(); if(isDrawing&&activeTool==='line'&&currentDrawingLine.startX!==undefined){drawUserLine(currentDrawingLine);} 
             if(activeTool==='cube'&&currentMousePos.x){ 
-                drawCubePreview(currentMousePos.x,currentMousePos.y,currentDefaultCubeWidth, currentDefaultCubeHeight, currentDefaultCubeDepth, 0); 
+                drawCubePreview(currentMousePos.x,currentMousePos.y,currentDefaultCubeWidth, currentDefaultCubeHeight, currentDefaultCubeDepth, 0, 0, 0); 
             } else if (activeTool === 'pyramid' && currentMousePos.x) {
-                drawPyramidPreview(currentMousePos.x, currentMousePos.y, currentDefaultPyramidBaseW, currentDefaultPyramidBaseD, currentDefaultPyramidHeight, 0);
+                drawPyramidPreview(currentMousePos.x, currentMousePos.y, currentDefaultPyramidBaseW, currentDefaultPyramidBaseD, currentDefaultPyramidHeight, 0, 0, 0);
             }
             } catch(error){console.error("Error during draw():",error);} finally{updateButtonStates();}
         }
@@ -796,7 +834,71 @@
         function drawGrid3P(vp1,vp2,vp3){ for(let i=0;i<=numGridLines;i++){let r=i/numGridLines;drawLineToVP(canvas.width*r,0,vp1);drawLineToVP(canvas.width*r,canvas.height,vp1);drawLineToVP(0,canvas.height*r,vp2);drawLineToVP(canvas.width,canvas.height*r,vp2);drawLineToVP(canvas.width*r,(vp3.y<horizonY?canvas.height:0),vp3);drawLineToVP((vp3.x<canvas.width/2?canvas.width:0),canvas.height*r,vp3);}}
         function drawAxisReferenceLines() { const origin={x:canvas.width/2,y:horizonY};const axisLength=Math.min(canvas.width,canvas.height)*0.4;ctx.save();ctx.lineWidth=1.5;ctx.strokeStyle='rgba(0,255,0,0.7)';ctx.beginPath();ctx.moveTo(origin.x,origin.y-axisLength);ctx.lineTo(origin.x,origin.y+axisLength);ctx.stroke();ctx.fillText("Y",origin.x+5,origin.y-axisLength-5);ctx.strokeStyle='rgba(255,0,0,0.7)';const vpX=vps.find(vp=>vp.id==='VP1');if(perspectiveType==='2'&&vpX){drawLineToVP(origin.x,origin.y,vpX,'rgba(255,0,0,0.7)');const oppositeVpX={x:origin.x-(vpX.x-origin.x),y:origin.y-(vpX.y-origin.y)};drawLineToVP(origin.x,origin.y,oppositeVpX,'rgba(255,0,0,0.7)');ctx.fillText("X",vpX.x>origin.x?vpX.x-20:vpX.x+10,vpX.y);}else if(perspectiveType==='1'&&vpX){ctx.beginPath();ctx.moveTo(origin.x-axisLength,origin.y);ctx.lineTo(origin.x+axisLength,origin.y);ctx.stroke();ctx.fillText("X",origin.x+axisLength+5,origin.y+5);}else if(perspectiveType==='3'&&vpX){drawLineToVP(origin.x,origin.y,vpX,'rgba(255,0,0,0.7)');const oppositeVpX={x:origin.x-(vpX.x-origin.x),y:origin.y-(vpX.y-origin.y)};drawLineToVP(origin.x,origin.y,oppositeVpX,'rgba(255,0,0,0.7)');ctx.fillText("X",vpX.x>origin.x?vpX.x-20:vpX.x+10,vpX.y);}ctx.strokeStyle='rgba(0,0,255,0.7)';const vpZ=vps.find(vp=>vp.id===(perspectiveType==='1'?'VP1':'VP2'));if((perspectiveType==='2'||perspectiveType==='3')&&vpZ){drawLineToVP(origin.x,origin.y,vpZ,'rgba(0,0,255,0.7)');const oppositeVpZ={x:origin.x-(vpZ.x-origin.x),y:origin.y-(vpZ.y-origin.y)};drawLineToVP(origin.x,origin.y,oppositeVpZ,'rgba(0,0,255,0.7)');ctx.fillText("Z",vpZ.x>origin.x?vpZ.x-20:vpZ.x+10,vpZ.y);}else if(perspectiveType==='1'&&vpZ){drawLineToVP(origin.x,origin.y,vpZ,'rgba(0,0,255,0.7)');const farPoint={x:origin.x-(vpZ.x-origin.x),y:origin.y-(vpZ.y-origin.y)};drawLineToVP(origin.x,origin.y,farPoint,'rgba(0,0,255,0.7)');ctx.fillText("Z",vpZ.x,vpZ.y+15);}ctx.restore(); }
         function drawUserLine(line) { ctx.beginPath();ctx.moveTo(line.startX,line.startY);ctx.lineTo(line.endX,line.endY);ctx.strokeStyle=line.color;ctx.lineWidth=line.lineWidth;ctx.lineCap="round";ctx.stroke(); }
-        function intersect(p1,p2,p3,p4) { if(!p1||!p2||!p3||!p4)return null;const den=(p1.x-p2.x)*(p3.y-p4.y)-(p1.y-p2.y)*(p3.x-p4.x);if(den===0)return null;const t=((p1.x-p3.x)*(p3.y-p4.y)-(p1.y-p3.y)*(p3.x-p4.x))/den;const ix=p1.x+t*(p2.x-p1.x);const iy=p1.y+t*(p2.y-p1.y);if(!isFinite(ix)||!isFinite(iy))return null;return{x:ix,y:iy}; }
+function intersect(p1,p2,p3,p4) { if(!p1||!p2||!p3||!p4)return null;const den=(p1.x-p2.x)*(p3.y-p4.y)-(p1.y-p2.y)*(p3.x-p4.x);if(den===0)return null;const t=((p1.x-p3.x)*(p3.y-p4.y)-(p1.y-p3.y)*(p3.x-p4.x))/den;const ix=p1.x+t*(p2.x-p1.x);const iy=p1.y+t*(p2.y-p1.y);if(!isFinite(ix)||!isFinite(iy))return null;return{x:ix,y:iy}; }
+
+function rotateVPForObject(vp, anchorX, anchorY, angleRad) {
+            if(!vp) return null;
+            const dx = vp.x - anchorX;
+            const dy = vp.y - anchorY;
+            const cosA = Math.cos(angleRad);
+            const sinA = Math.sin(angleRad);
+            const dxR = dx * cosA - dy * sinA;
+            const dyR = dx * sinA + dy * cosA;
+            if(Math.abs(dyR) < 0.0001) {
+                return { x: anchorX + dxR * 10000, y: horizonY };
+}
+
+        function rotatePoint3D(pt, rx, ry, rz) {
+            let x=pt.x, y=pt.y, z=pt.z;
+            const cx=Math.cos(rx), sx=Math.sin(rx);
+            const cy=Math.cos(ry), sy=Math.sin(ry);
+            const cz=Math.cos(rz), sz=Math.sin(rz);
+            let y1=y*cx - z*sx; let z1=y*sx + z*cx; y=y1; z=z1;
+            let x1=x*cy + z*sy; z1=-x*sy + z*cy; x=x1; z=z1;
+            x1=x*cz - y*sz; y1=x*sz + y*cz; x=x1; y=y1;
+            return {x:x, y:y, z:z};
+        }
+
+function projectPoint3D(pt, anchorX, anchorY) {
+            const scale = FOV_DIST / (FOV_DIST + pt.z);
+            return { x: anchorX + pt.x * scale, y: anchorY + pt.y * scale };
+        }
+
+        function calculateCubePoints3D(anchorX, anchorY, obj) {
+            const {width, height, depth, rotationX=0, rotationY=0, rotationZ=0} = obj;
+            const hw=width/2, hh=height/2, hd=depth/2;
+            const pts=[
+                {x:-hw, y:-hh, z:-hd},
+                {x: hw, y:-hh, z:-hd},
+                {x: hw, y: hh, z:-hd},
+                {x:-hw, y: hh, z:-hd},
+                {x:-hw, y:-hh, z: hd},
+                {x: hw, y:-hh, z: hd},
+                {x: hw, y: hh, z: hd},
+                {x:-hw, y: hh, z: hd}
+            ];
+            const rx=rotationX*Math.PI/180, ry=rotationY*Math.PI/180, rz=rotationZ*Math.PI/180;
+            return pts.map(p=>projectPoint3D(rotatePoint3D(p,rx,ry,rz),anchorX,anchorY));
+        }
+
+        function calculatePyramidPoints3D(anchorX, anchorY, obj) {
+            const {baseWidth, baseDepth, height, rotationX=0, rotationY=0, rotationZ=0} = obj;
+            const hw=baseWidth/2, hd=baseDepth/2;
+            const base=[
+                {x:-hw, y:0, z:-hd},
+                {x: hw, y:0, z:-hd},
+                {x: hw, y:0, z: hd},
+                {x:-hw, y:0, z: hd}
+            ];
+            const apex={x:0, y:-height, z:0};
+            const rx=rotationX*Math.PI/180, ry=rotationY*Math.PI/180, rz=rotationZ*Math.PI/180;
+            const baseProj=base.map(p=>projectPoint3D(rotatePoint3D(p,rx,ry,rz),anchorX,anchorY));
+            const apexProj=projectPoint3D(rotatePoint3D(apex,rx,ry,rz),anchorX,anchorY);
+            return [...baseProj, apexProj];
+        }
+            const t = (horizonY - anchorY) / dyR;
+            return { x: anchorX + dxR * t, y: horizonY };
+        }
         
         // --- Shape Point Calculation ---
         function recalculateShapePoints(shapeObject) {
@@ -810,89 +912,19 @@
 
         // --- Cube Specific Logic ---
         function calculateCubePointsForPerspective(anchorX, anchorY, objData, pType, currentVps) {
-            const { width, height, depth, rotationY = 0 } = objData; 
-            let p_unrotated = Array(8).fill(null); 
-            let p_final = Array(8).fill(null).map(() => ({x:0, y:0})); 
-            
-            const calculateFactor = (dim, defaultDimBase) => { if (defaultDimBase === 0) return PERSPECTIVE_STRENGTH; return Math.max(0.01, Math.min(0.99, PERSPECTIVE_STRENGTH * (dim / defaultDimBase))); }
-            const effWidthFactor = calculateFactor(width, 50); 
-            const effDepthFactor = calculateFactor(depth, 50);
-            const effHeightFactor3P = calculateFactor(height, 50);
-            
-            const angleRad = rotationY * Math.PI / 180;
-            const cosA = Math.cos(angleRad);
-            const sinA = Math.sin(angleRad);
-            const rotatePoint = (point, anchor) => { if (!point) return null; const dx = point.x - anchor.x; const dy = point.y - anchor.y; return { x: anchor.x + (dx * cosA - dy * sinA), y: anchor.y + (dx * sinA + dy * cosA) }; };
-
-            if (pType === '1' && currentVps.length >= 1) {
-                const vp1 = currentVps[0];
-                p_unrotated[0] = { x: anchorX - width/2, y: anchorY - height/2 }; 
-                p_unrotated[1] = { x: anchorX + width/2, y: anchorY - height/2 };
-                p_unrotated[2] = { x: anchorX + width/2, y: anchorY + height/2 }; 
-                p_unrotated[3] = { x: anchorX - width/2, y: anchorY + height/2 };
-                for(let i=0; i<4; i++) {
-                    p_unrotated[i+4] = getProjectedPoint(p_unrotated[i], vp1, effDepthFactor);
-                    if (!p_unrotated[i+4]) return null; 
-                }
-            } else if (pType === '2' && currentVps.length >= 2) {
-                const vp1 = currentVps[0]; const vp2 = currentVps[1];
-                // Define base points using anchor and VPs
-                p_unrotated[0] = {x: anchorX, y: anchorY}; // Bottom-front corner
-                p_unrotated[1] = getProjectedPoint(p_unrotated[0], vp1, effWidthFactor); if(!p_unrotated[1]) return null;
-                p_unrotated[3] = getProjectedPoint(p_unrotated[0], vp2, effDepthFactor); if(!p_unrotated[3]) return null;
-                p_unrotated[2] = intersect(p_unrotated[1], vp2, p_unrotated[3], vp1); if(!p_unrotated[2]) return null;
-
-                // Define top points by projecting from a "top anchor"
-                const topAnchor = {x: anchorX, y: anchorY - height};
-                p_unrotated[4] = topAnchor; // Top-front corner (directly above anchor before perspective)
-                p_unrotated[5] = getProjectedPoint(p_unrotated[4], vp1, effWidthFactor); if(!p_unrotated[5]) return null;
-                p_unrotated[7] = getProjectedPoint(p_unrotated[4], vp2, effDepthFactor); if(!p_unrotated[7]) return null;
-                p_unrotated[6] = intersect(p_unrotated[5], vp2, p_unrotated[7], vp1); if(!p_unrotated[6]) return null;
-
-            } else if (pType === '3' && currentVps.length >= 3) {
-                const vp1 = currentVps[0]; const vp2 = currentVps[1]; const vp3 = currentVps[2];
-                p_unrotated[0] = {x: anchorX, y: anchorY};
-                p_unrotated[1] = getProjectedPoint(p_unrotated[0], vp1, effWidthFactor); if(!p_unrotated[1]) return null;
-                p_unrotated[3] = getProjectedPoint(p_unrotated[0], vp2, effDepthFactor); if(!p_unrotated[3]) return null;
-                p_unrotated[4] = getProjectedPoint(p_unrotated[0], vp3, effHeightFactor3P); if(!p_unrotated[4]) return null;
-                p_unrotated[2] = intersect(p_unrotated[1], vp2, p_unrotated[3], vp1); if(!p_unrotated[2]) return null;
-                p_unrotated[5] = intersect(p_unrotated[1], vp3, p_unrotated[4], vp1); if(!p_unrotated[5]) return null;
-                p_unrotated[7] = intersect(p_unrotated[3], vp3, p_unrotated[4], vp2); if(!p_unrotated[7]) return null;
-                let p6_candidate = null;
-                if(p_unrotated[2] && p_unrotated[5]) p6_candidate = intersect(p_unrotated[2], vp3, p_unrotated[5], vp2);
-                if(!p6_candidate && p_unrotated[2] && p_unrotated[7]) p6_candidate = intersect(p_unrotated[2], vp3, p_unrotated[7], vp1);
-                if(!p6_candidate && p_unrotated[5] && p_unrotated[7]) p6_candidate = intersect(p_unrotated[5], vp2, p_unrotated[7], vp1);
-                p_unrotated[6] = p6_candidate;
-                if(!p_unrotated[6]) return null;
-            } else { return null; }
-
-            if (rotationY !== 0) {
-                for (let i = 0; i < 8; i++) {
-                    if (!p_unrotated[i]) return null; 
-                    p_final[i] = rotatePoint(p_unrotated[i], {x: anchorX, y: anchorY}); 
-                    if(!p_final[i]) return null;
-                }
-            } else {
-                 for (let i = 0; i < 8; i++) {
-                     if (!p_unrotated[i]) return null;
-                     p_final[i] = p_unrotated[i];
-                 }
-            }
-            
-            if (p_final.some(pt => !pt || !isFinite(pt.x) || !isFinite(pt.y))) return null;
-            return p_final;
+            return calculateCubePoints3D(anchorX, anchorY, objData);
         }
-        function addPerspectiveCube(anchorX, anchorY, width, height, depth, id = Date.now(), material = objMaterialSelect.value, fillColor = globalDefaultFillColor, hasCustomColor = false, rotationY = 0) { 
-            const cubeData = { width, height, depth, rotationY }; const points = calculateCubePointsForPerspective(anchorX, anchorY, cubeData, perspectiveType, vps); if (!points) { console.warn("Could not calculate points for cube at add."); return false; }
+        function addPerspectiveCube(anchorX, anchorY, width, height, depth, id = Date.now(), material = objMaterialSelect.value, fillColor = globalDefaultFillColor, hasCustomColor = false, rotationX = 0, rotationY = 0, rotationZ = 0) { 
+            const cubeData = { width, height, depth, rotationX, rotationY, rotationZ }; const points = calculateCubePointsForPerspective(anchorX, anchorY, cubeData, perspectiveType, vps); if (!points) { console.warn("Could not calculate points for cube at add."); return false; }
             let finalFillColor = fillColor; if (!hasCustomColor) { if (material === 'building_default') finalFillColor = '#a0a0a0'; else if (material === 'glass') finalFillColor = '#add8e6'; else if (material === 'wood') finalFillColor = '#deb887'; else if (material === 'brick') finalFillColor = '#b22222'; else finalFillColor = globalDefaultFillColor; }
-            drawnObjects.push({ type: 'cube', id: id, data: { points: points, width: width, height: height, depth: depth, anchor: {x: anchorX, y: anchorY}, rotationY: rotationY, fillColor: finalFillColor, strokeColor: currentLineColor, lineWidth: currentLineWidth, material: material, viewMode: objViewModeSelect.value, hasCustomColor: hasCustomColor } });
+            drawnObjects.push({ type: 'cube', id: id, data: { points: points, width: width, height: height, depth: depth, anchor: {x: anchorX, y: anchorY}, rotationX: rotationX, rotationY: rotationY, rotationZ: rotationZ, fillColor: finalFillColor, strokeColor: currentLineColor, lineWidth: currentLineWidth, material: material, viewMode: objViewModeSelect.value, hasCustomColor: hasCustomColor } });
             saveState(); draw(); return true; 
         }
         function recalculateCubePoints(cubeObject) { 
-            if (!cubeObject || cubeObject.type !== 'cube') return false; const { anchor, width, height, depth, rotationY = 0 } = cubeObject.data; if (anchor === undefined || width === undefined || height === undefined || depth === undefined) { console.error("Cube object missing data for recalculation:", cubeObject.data); return false; } const newPoints = calculateCubePointsForPerspective(anchor.x, anchor.y, {width,height,depth, rotationY}, perspectiveType, vps); if (newPoints) { cubeObject.data.points = newPoints; return true; } console.warn("Recalculation of cube points failed for ID:", cubeObject.id); return false;
+            if (!cubeObject || cubeObject.type !== 'cube') return false; const { anchor, width, height, depth, rotationX = 0, rotationY = 0, rotationZ = 0 } = cubeObject.data; if (anchor === undefined || width === undefined || height === undefined || depth === undefined) { console.error("Cube object missing data for recalculation:", cubeObject.data); return false; } const newPoints = calculateCubePointsForPerspective(anchor.x, anchor.y, {width,height,depth, rotationX: cubeObject.data.rotationX || 0, rotationY, rotationZ: cubeObject.data.rotationZ || 0}, perspectiveType, vps); if (newPoints) { cubeObject.data.points = newPoints; return true; } console.warn("Recalculation of cube points failed for ID:", cubeObject.id); return false;
         }
-        function drawCubePreview(anchorX, anchorY, width, height, depth, rotationY = 0) { 
-            const previewData = { width, height, depth, rotationY }; const previewPoints = calculateCubePointsForPerspective(anchorX, anchorY, previewData, perspectiveType, vps); if (previewPoints) { ctx.save(); ctx.strokeStyle = 'rgba(0,100,255,0.5)'; ctx.lineWidth=1; ctx.setLineDash([3,3]); const p = previewPoints; ctx.beginPath(); ctx.moveTo(p[0].x,p[0].y);ctx.lineTo(p[1].x,p[1].y);ctx.lineTo(p[2].x,p[2].y);ctx.lineTo(p[3].x,p[3].y);ctx.closePath(); ctx.moveTo(p[4].x,p[4].y);ctx.lineTo(p[5].x,p[5].y);ctx.lineTo(p[6].x,p[6].y);ctx.lineTo(p[7].x,p[7].y);ctx.closePath(); ctx.moveTo(p[0].x,p[0].y);ctx.lineTo(p[4].x,p[4].y);ctx.moveTo(p[1].x,p[1].y);ctx.lineTo(p[5].x,p[5].y); ctx.moveTo(p[2].x,p[2].y);ctx.lineTo(p[6].x,p[6].y);ctx.moveTo(p[3].x,p[3].y);ctx.lineTo(p[7].x,p[7].y); ctx.stroke(); ctx.restore(); }
+        function drawCubePreview(anchorX, anchorY, width, height, depth, rotationX = 0, rotationY = 0, rotationZ = 0) { 
+            const previewData = { width, height, depth, rotationX, rotationY, rotationZ }; const previewPoints = calculateCubePointsForPerspective(anchorX, anchorY, previewData, perspectiveType, vps); if (previewPoints) { ctx.save(); ctx.strokeStyle = 'rgba(0,100,255,0.5)'; ctx.lineWidth=1; ctx.setLineDash([3,3]); const p = previewPoints; ctx.beginPath(); ctx.moveTo(p[0].x,p[0].y);ctx.lineTo(p[1].x,p[1].y);ctx.lineTo(p[2].x,p[2].y);ctx.lineTo(p[3].x,p[3].y);ctx.closePath(); ctx.moveTo(p[4].x,p[4].y);ctx.lineTo(p[5].x,p[5].y);ctx.lineTo(p[6].x,p[6].y);ctx.lineTo(p[7].x,p[7].y);ctx.closePath(); ctx.moveTo(p[0].x,p[0].y);ctx.lineTo(p[4].x,p[4].y);ctx.moveTo(p[1].x,p[1].y);ctx.lineTo(p[5].x,p[5].y); ctx.moveTo(p[2].x,p[2].y);ctx.lineTo(p[6].x,p[6].y);ctx.moveTo(p[3].x,p[3].y);ctx.lineTo(p[7].x,p[7].y); ctx.stroke(); ctx.restore(); }
         }
         function drawCube(cubeObj) { 
             const { points, fillColor, strokeColor, lineWidth, viewMode, material } = cubeObj.data; if (!points || points.length !== 8 || points.some(pt => !pt || !isFinite(pt.x) || !isFinite(pt.y))) { return; } ctx.save(); ctx.strokeStyle = strokeColor || currentLineColor; ctx.lineWidth = lineWidth || currentLineWidth; let actualFillColor = fillColor || globalDefaultFillColor; if (material === 'glass') { ctx.globalAlpha = 0.6; } ctx.fillStyle = actualFillColor; ctx.lineCap = "round"; ctx.lineJoin = "round"; const p = points; const facePointArrays = [ [p[0],p[1],p[2],p[3]],[p[4],p[5],p[6],p[7]],[p[0],p[1],p[5],p[4]],[p[1],p[2],p[6],p[5]],[p[2],p[3],p[7],p[6]],[p[3],p[0],p[4],p[7]] ]; if (viewMode === 'shaded' || viewMode === 'shaded_wireframe') { facePointArrays.forEach(currentFacePoints => { ctx.beginPath(); ctx.moveTo(currentFacePoints[0].x, currentFacePoints[0].y); for (let i = 1; i < currentFacePoints.length; i++) { ctx.lineTo(currentFacePoints[i].x, currentFacePoints[i].y); } ctx.closePath(); ctx.fill(); }); if (material === 'brick' && (viewMode === 'shaded' || viewMode === 'shaded_wireframe')) { drawBrickPattern(facePointArrays, actualFillColor, lineWidth || currentLineWidth); } else if (material === 'wood' && (viewMode === 'shaded' || viewMode === 'shaded_wireframe')) { drawWoodGrainPattern(facePointArrays, actualFillColor, lineWidth || currentLineWidth); } } ctx.globalAlpha = 1.0;  if (viewMode === 'wireframe' || viewMode === 'shaded_wireframe') { ctx.beginPath(); ctx.moveTo(p[0].x,p[0].y);ctx.lineTo(p[1].x,p[1].y);ctx.lineTo(p[2].x,p[2].y);ctx.lineTo(p[3].x,p[3].y);ctx.closePath(); ctx.moveTo(p[4].x,p[4].y);ctx.lineTo(p[5].x,p[5].y);ctx.lineTo(p[6].x,p[6].y);ctx.lineTo(p[7].x,p[7].y);ctx.closePath(); ctx.moveTo(p[0].x,p[0].y);ctx.lineTo(p[4].x,p[4].y);ctx.moveTo(p[1].x,p[1].y);ctx.lineTo(p[5].x,p[5].y); ctx.moveTo(p[2].x,p[2].y);ctx.lineTo(p[6].x,p[6].y);ctx.moveTo(p[3].x,p[3].y);ctx.lineTo(p[7].x,p[7].y); ctx.stroke(); } if (selectedObject && selectedObject.id === cubeObj.id) { ctx.strokeStyle='rgba(255,165,0,0.9)';ctx.lineWidth=(lineWidth||currentLineWidth)+2; ctx.beginPath(); ctx.moveTo(p[0].x,p[0].y);ctx.lineTo(p[1].x,p[1].y);ctx.lineTo(p[2].x,p[2].y);ctx.lineTo(p[3].x,p[3].y);ctx.closePath(); ctx.moveTo(p[4].x,p[4].y);ctx.lineTo(p[5].x,p[5].y);ctx.lineTo(p[6].x,p[6].y);ctx.lineTo(p[7].x,p[7].y);ctx.closePath(); ctx.moveTo(p[0].x,p[0].y);ctx.lineTo(p[4].x,p[4].y);ctx.moveTo(p[1].x,p[1].y);ctx.lineTo(p[5].x,p[5].y); ctx.moveTo(p[2].x,p[2].y);ctx.lineTo(p[6].x,p[6].y);ctx.moveTo(p[3].x,p[3].y);ctx.lineTo(p[7].x,p[7].y); ctx.stroke(); } ctx.restore(); 
@@ -900,76 +932,7 @@
 
         // --- Pyramid Specific Logic ---
         function calculatePyramidPointsForPerspective(anchorX, anchorY, objData, pType, currentVps) {
-            const { baseWidth, baseDepth, height, rotationY = 0 } = objData;
-            let p_unrotated_base = Array(4).fill(null);
-            let p_unrotated_apex = null;
-            let p_final = Array(5).fill(null).map(() => ({x:0, y:0}));
-
-            const calculateFactor = (dim, defaultDimBase) => Math.max(0.01, Math.min(0.99, PERSPECTIVE_STRENGTH * (dim / defaultDimBase)));
-            const effBaseWFactor = calculateFactor(baseWidth, 50);
-            const effBaseDFactor = calculateFactor(baseDepth, 50);
-            const effHeightFactor3P = calculateFactor(height, 50);
-
-            const angleRad = rotationY * Math.PI / 180;
-            const cosA = Math.cos(angleRad);
-            const sinA = Math.sin(angleRad);
-            const rotatePoint = (point, anchor) => { if (!point) return null; const dx = point.x - anchor.x; const dy = point.y - anchor.y; return { x: anchor.x + (dx * cosA - dy * sinA), y: anchor.y + (dx * sinA + dy * cosA) }; };
-
-            if (pType === '1' && currentVps.length >= 1) {
-                const vp1 = currentVps[0];
-                p_unrotated_base[0] = { x: anchorX - baseWidth/2, y: anchorY + baseDepth/2 };
-                p_unrotated_base[1] = { x: anchorX + baseWidth/2, y: anchorY + baseDepth/2 };
-                p_unrotated_base[2] = { x: anchorX + baseWidth/2, y: anchorY - baseDepth/2 };
-                p_unrotated_base[3] = { x: anchorX - baseWidth/2, y: anchorY - baseDepth/2 };
-                for(let i=0; i<4; i++) {
-                    p_unrotated_base[i] = getProjectedPoint(p_unrotated_base[i], vp1, effBaseDFactor);
-                    if(!p_unrotated_base[i]) return null;
-                }
-                const baseXCenter = (p_unrotated_base[0].x + p_unrotated_base[1].x + p_unrotated_base[2].x + p_unrotated_base[3].x) / 4;
-                const baseYCenter = (p_unrotated_base[0].y + p_unrotated_base[1].y + p_unrotated_base[2].y + p_unrotated_base[3].y) / 4;
-                p_unrotated_apex = { x: baseXCenter, y: baseYCenter - height };
-                p_unrotated_apex = getProjectedPoint(p_unrotated_apex, vp1, effBaseDFactor); 
-                if(!p_unrotated_apex) return null;
-
-            } else if (pType === '2' && currentVps.length >= 2) {
-                const vp1 = currentVps[0]; const vp2 = currentVps[1];
-                p_unrotated_base[0] = {x: anchorX, y: anchorY};
-                p_unrotated_base[1] = getProjectedPoint(p_unrotated_base[0], vp1, effBaseWFactor); if(!p_unrotated_base[1]) return null;
-                p_unrotated_base[3] = getProjectedPoint(p_unrotated_base[0], vp2, effBaseDFactor); if(!p_unrotated_base[3]) return null;
-                p_unrotated_base[2] = intersect(p_unrotated_base[1], vp2, p_unrotated_base[3], vp1); if(!p_unrotated_base[2]) return null;
-                
-                const baseXCenter = (p_unrotated_base[0].x + p_unrotated_base[1].x + p_unrotated_base[2].x + p_unrotated_base[3].x) / 4;
-                const baseYCenter = (p_unrotated_base[0].y + p_unrotated_base[1].y + p_unrotated_base[2].y + p_unrotated_base[3].y) / 4;
-                p_unrotated_apex = { x: baseXCenter, y: baseYCenter - height }; 
-
-            } else if (pType === '3' && currentVps.length >= 3) {
-                const vp1 = currentVps[0]; const vp2 = currentVps[1]; const vp3 = currentVps[2];
-                p_unrotated_base[0] = {x: anchorX, y: anchorY};
-                p_unrotated_base[1] = getProjectedPoint(p_unrotated_base[0], vp1, effBaseWFactor); if(!p_unrotated_base[1]) return null;
-                p_unrotated_base[3] = getProjectedPoint(p_unrotated_base[0], vp2, effBaseDFactor); if(!p_unrotated_base[3]) return null;
-                p_unrotated_base[2] = intersect(p_unrotated_base[1], vp2, p_unrotated_base[3], vp1); if(!p_unrotated_base[2]) return null;
-
-                const baseXCenter = (p_unrotated_base[0].x + p_unrotated_base[1].x + p_unrotated_base[2].x + p_unrotated_base[3].x) / 4;
-                const baseYCenter = (p_unrotated_base[0].y + p_unrotated_base[1].y + p_unrotated_base[2].y + p_unrotated_base[3].y) / 4;
-                let apex_temp = { x: baseXCenter, y: baseYCenter - height };
-                p_unrotated_apex = getProjectedPoint(apex_temp, vp3, effHeightFactor3P); 
-                if(!p_unrotated_apex) return null;
-            } else { return null; }
-
-            if (rotationY !== 0) {
-                for(let i=0; i<4; i++) {
-                    p_final[i] = rotatePoint(p_unrotated_base[i], {x: anchorX, y: anchorY});
-                    if(!p_final[i]) return null;
-                }
-                p_final[4] = rotatePoint(p_unrotated_apex, {x: anchorX, y: anchorY}); 
-                if(!p_final[4]) return null;
-            } else {
-                for(let i=0; i<4; i++) p_final[i] = p_unrotated_base[i];
-                p_final[4] = p_unrotated_apex;
-            }
-
-            if (p_final.some(pt => !pt || !isFinite(pt.x) || !isFinite(pt.y))) return null;
-            return p_final; 
+            return calculatePyramidPoints3D(anchorX, anchorY, objData);
         }
 
         function addPerspectivePyramid(anchorX, anchorY, baseWidth, baseDepth, height, id = Date.now(), material = objMaterialSelect.value, fillColor = globalDefaultFillColor, hasCustomColor = false, rotationY = 0) {
@@ -1000,16 +963,16 @@
 
         function recalculatePyramidPoints(pyramidObject) {
             if (!pyramidObject || pyramidObject.type !== 'pyramid') return false;
-            const { anchor, baseWidth, baseDepth, height, rotationY = 0 } = pyramidObject.data;
+            const { anchor, baseWidth, baseDepth, height, rotationX = 0, rotationY = 0, rotationZ = 0 } = pyramidObject.data;
             if (!anchor || baseWidth === undefined || baseDepth === undefined || height === undefined) return false;
-            const newPoints = calculatePyramidPointsForPerspective(anchor.x, anchor.y, {baseWidth, baseDepth, height, rotationY}, perspectiveType, vps);
+            const newPoints = calculatePyramidPointsForPerspective(anchor.x, anchor.y, {baseWidth, baseDepth, height, rotationX: pyramidObject.data.rotationX || 0, rotationY: pyramidObject.data.rotationY || 0, rotationZ: pyramidObject.data.rotationZ || 0}, perspectiveType, vps);
             if (newPoints) { pyramidObject.data.points = newPoints; return true; }
             console.warn("Recalculation of pyramid points failed for ID:", pyramidObject.id);
             return false;
         }
 
-        function drawPyramidPreview(anchorX, anchorY, baseW, baseD, height, rotationY = 0) {
-            const previewData = { baseWidth: baseW, baseDepth: baseD, height, rotationY };
+        function drawPyramidPreview(anchorX, anchorY, baseW, baseD, height, rotationX = 0, rotationY = 0, rotationZ = 0) {
+            const previewData = { baseWidth: baseW, baseDepth: baseD, height, rotationX, rotationY, rotationZ };
             const previewPoints = calculatePyramidPointsForPerspective(anchorX, anchorY, previewData, perspectiveType, vps);
             if (previewPoints && previewPoints.length === 5) {
                 ctx.save();
